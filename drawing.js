@@ -1,26 +1,52 @@
+// drawXXX draw on html canvas
+// rasterizeXXX rasterize on virtual canvas
+
 // virtual canvas pixel size
 const step = 10;
 
-function drawPixel(x, y) {
+function drawPixelVirtualCanvas(x, y, color) {
   var canvas = document.getElementById('canvas');
-  var x_coor = x * step;
-  var y_coor = y * step;
+  var x_coor = parseInt(x) * step;
+  var y_coor = parseInt(y) * step;
   var ctx = canvas.getContext('2d');
-  ctx.fillStyle = 'rgb(255, 0, 0)';
+  if (color == null)
+    ctx.fillStyle = 'rgb(255, 0, 0)';
+  else
+    ctx.fillStyle = color;
   ctx.fillRect(x_coor, y_coor, step, step);
 }
 
 function Edge(x1, y1, x2, y2) {
-  this.x1 = parseInt(x1)
-  this.y1 = parseInt(y1)
-  this.x2 = parseInt(x2)
-  this.y2 = parseInt(y2)
+  this.x1 = x1;
+  this.y1 = y1;
+  this.x2 = x2;
+  this.y2 = y2;
 
   if (this.y1 >= this.y2) {
-    this.x2 = parseInt(x1)
-    this.y2 = parseInt(y1)
-    this.x1 = parseInt(x2)
-    this.y1 = parseInt(y2)
+    this.x2 = x1
+    this.y2 = y1
+    this.x1 = x2
+    this.y1 = y2
+  }
+
+  // build edge function according vetices order
+  this.deltaX = x2 - x1;
+  this.deltaY = y2 - y1;
+
+  this.fx = function(x, y) {
+    return (x - x1) * this.deltaY - (y - y1) * this.deltaX;
+  }
+
+  this.draw = function() {
+    var canvas = document.getElementById('canvas');
+    var ctx = canvas.getContext('2d');
+    ctx.strokeStyle = 'rgb(0, 200, 0)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(this.x1 * step, this.y1 * step);
+    ctx.lineTo(this.x2 * step, this.y2 * step);
+    ctx.closePath();
+    ctx.stroke();
   }
 }
 
@@ -33,7 +59,7 @@ function Span(x1, x2) {
   }
 }
 
-function drawSpan(span, y) {
+function rasterizeSpan(span, y) {
   var xdiff = parseInt(span.x2 - span.x1)
   if (xdiff == 0)
     return;
@@ -42,12 +68,12 @@ function drawSpan(span, y) {
   var factorStep = 1.0 / xdiff;
 
   for (var x = span.x1; x < span.x2; x++) {
-    drawPixel(x, y);
+    drawPixelVirtualCanvas(x, y);
     factor += factorStep;
   }
 }
 
-function drawSpansBetweenEdges(edge1, edge2) {
+function rasterizeSpansBetweenEdges(edge1, edge2) {
   var e1ydiff = parseFloat(edge1.y2 - edge1.y1);
   if (e1ydiff == 0.0)
     return;
@@ -68,7 +94,7 @@ function drawSpansBetweenEdges(edge1, edge2) {
     // create and draw span
     var span = new Span(edge1.x1 + parseInt(e1xdiff * factor1),
       edge2.x1 + parseInt(e2xdiff * factor2));
-    drawSpan(span, y);
+    rasterizeSpan(span, y);
 
     // increase factors
     factor1 += factorStep1;
@@ -76,55 +102,140 @@ function drawSpansBetweenEdges(edge1, edge2) {
   }
 }
 
-function drawTriangleScanLine(x1, y1, x2, y2, x3, y3) {
-  var edges = [
+function Triangle(x1, y1, x2, y2, x3, y3) {
+  this.vetices = [
+    { x: x1, y: y1 },
+    { x: x2, y: y2 },
+    { x: x3, y: y3 }
+  ];
+  this.edges = [
     new Edge(x1, y1, x2, y2),
     new Edge(x2, y2, x3, y3),
     new Edge(x3, y3, x1, y1)
   ];
 
-  var maxLength = 0;
-  var longEdge = 0;
+  this.rasterizeScanLine = function() {
+    var maxLength = 0;
+    var longEdge = 0;
 
-  for (var i = 0; i < 3; i++) {
-    var length = edges[i].y2 - edges[i].y1;
-    if (length > maxLength) {
-      maxLength = length;
-      longEdge = i;
+    for (var i = 0; i < 3; i++) {
+      var length = this.edges[i].y2 - this.edges[i].y1;
+      if (length > maxLength) {
+        maxLength = length;
+        longEdge = i;
+      }
+    }
+
+    var shortEdge1 = (longEdge + 1) % 3;
+    var shortEdge2 = (longEdge + 2) % 3;
+
+    rasterizeSpansBetweenEdges(this.edges[longEdge], this.edges[shortEdge1]);
+    rasterizeSpansBetweenEdges(this.edges[longEdge], this.edges[shortEdge2]);
+
+    // draw edge on js canvas
+    for (var i = 0; i < 3; i++) {
+      this.edges[i].draw();
     }
   }
 
-  var shortEdge1 = (longEdge + 1) % 3;
-  var shortEdge2 = (longEdge + 2) % 3;
-
-  drawSpansBetweenEdges(edges[longEdge], edges[shortEdge1]);
-  drawSpansBetweenEdges(edges[longEdge], edges[shortEdge2]);
-
-  {
-    // draw edge on js canvas
-    var canvas = document.getElementById('canvas');
-    var ctx = canvas.getContext('2d');
-    ctx.strokeStyle = 'rgb(0, 200, 0)';
-    ctx.lineWidth = 1;
-    ctx.moveTo(x1 * step, y1 * step);
-    ctx.beginPath();
-    ctx.lineTo(x2 * step, y2 * step);
-    ctx.lineTo(x3 * step, y3 * step);
-    ctx.lineTo(x1 * step, y1 * step);
-    ctx.closePath();
-    ctx.stroke();
+  this.AABB = function() {
+    var aa = { x: Number.MAX_SAFE_INTEGER, y: Number.MAX_SAFE_INTEGER };
+    var bb = { x: 0, y: 0 };
+    for (var i = 0; i < 3; i++) {
+      if (this.vetices[i].x < aa.x) {
+        aa.x = this.vetices[i].x;
+      }
+      if (this.vetices[i].y < aa.y) {
+        aa.y = this.vetices[i].y;
+      }
+      if (this.vetices[i].x > bb.x) {
+        bb.x = this.vetices[i].x;
+      }
+      if (this.vetices[i].y > bb.y) {
+        bb.y = this.vetices[i].y;
+      }
+    }
+    aa.x = Math.floor(aa.x);
+    aa.y = Math.floor(aa.y);
+    bb.x = Math.ceil(bb.x);
+    bb.y = Math.ceil(bb.y);
+    return { AA: aa, BB: bb };
   }
+
+  this.drawAABBVirtualCanvas = function() {
+    var aabb = this.AABB();
+    for (var i = aabb.AA.x; i < aabb.BB.x; i++) {
+      for (var j = aabb.AA.y; j < aabb.BB.y; j++) {
+        drawPixelVirtualCanvas(i, j, 'rgb(200, 200, 255)');
+      }
+    }
+  }
+
+  this.rasterizeHalfPlane = function() {
+    var aabb = this.AABB();
+    for (var i = aabb.AA.x; i < aabb.BB.x; ++i) {
+      for (var j = aabb.AA.y; j < aabb.BB.y; ++j) {
+        if ((this.edges[0].fx(i, j) <= 0) &&
+          (this.edges[1].fx(i, j) <= 0) &&
+          (this.edges[2].fx(i, j) <= 0)) {
+          drawPixelVirtualCanvas(i, j);
+        }
+      }
+    }
+    // draw edge on js canvas
+    for (var i = 0; i < 3; i++) {
+      this.edges[i].draw();
+    }
+  }
+}
+
+function testEdgeFunction(x1, y1, x2, y2) {
+  var edge3 = new Edge(x1, y1, x2, y2)
+  edge3.draw();
+  var point1 = { x: x1 - 1, y: y1 };
+  var point2 = { x: x1 + 1, y: y1 };
+  var point3 = { x: x1, y: y1 };
+
+  var testPoint = function(point) {
+    var p = edge3.fx(point.x, point.y);
+    if (p > 0) {
+      drawPixelVirtualCanvas(point.x, point.y, 'rgb(0, 255, 0)');
+    } else if (p == 0) {
+      drawPixelVirtualCanvas(point.x, point.y, 'rgb(255, 0, 0)');
+    } else {
+      drawPixelVirtualCanvas(point.x, point.y, 'rgb(0, 0, 255)');
+    }
+  }
+
+  testPoint(point1);
+  testPoint(point2);
+  testPoint(point3);
 }
 
 function testCase(ctx) {
   // test draw a pixel on virtual canvas
-  drawPixel(0, 0);
+  drawPixelVirtualCanvas(0, 0);
+
   // test draw span
-  var edge1 = new Edge(100, 0, 50, 100);
-  var edge2 = new Edge(100, 0, 200, 100)
-  drawSpansBetweenEdges(edge1, edge2);
+  //var edge1 = new Edge(100, 0, 50, 100);
+  //var edge2 = new Edge(100, 0, 200, 100)
+  //drawSpansBetweenEdges(edge1, edge2);
+
   // test draw triangle
-  drawTriangleScanLine(10.5, 10.5, 50.4, 50.3, 30.8, 100.4);
+  var triangle = new Triangle(10.5, 10.5, 50.4, 50.3, 30.8, 100.4);
+  triangle.drawAABBVirtualCanvas();
+  triangle.rasterizeScanLine();
+  //rasterizeTriangleScanLine(10.5, 10.5, 50.4, 50.3, 30.8, 100.4);
+
+  // test edge function
+  testEdgeFunction(50, 70, 80, 0);
+  testEdgeFunction(180, 0, 200, 70);
+
+  // test half plane
+  // clockwise order
+  var triangle = new Triangle(60.5, 10.5, 100.4, 50.3, 80.8, 100.4);
+  triangle.drawAABBVirtualCanvas();
+  triangle.rasterizeHalfPlane();
 }
 
 function draw() {
