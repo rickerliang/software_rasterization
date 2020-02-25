@@ -4,6 +4,18 @@
 // virtual canvas pixel size
 const step = 10;
 
+function drawPixel(x, y, color) {
+  var canvas = document.getElementById('canvas');
+  var x_coor = x * step;
+  var y_coor = y * step;
+  var ctx = canvas.getContext('2d');
+  if (color == null)
+    ctx.fillStyle = 'rgb(255, 0, 0)';
+  else
+    ctx.fillStyle = color;
+  ctx.fillRect(x_coor, y_coor, 1, 1);
+}
+
 function drawPixelVirtualCanvas(x, y, color) {
   var canvas = document.getElementById('canvas');
   var x_coor = parseInt(x) * step;
@@ -171,15 +183,116 @@ function Triangle(x1, y1, x2, y2, x3, y3) {
     }
   }
 
-  this.rasterizeHalfPlane = function() {
+  this.rasterizeHalfPlane = function(superSample) {
+    var ssaa = 0
+    var drawFunction = null;
+    if (superSample == 4) {
+      // ssaa 4x
+      ssaa = 4;
+      var subPixelAlphaStep = 1 / ssaa;
+      var samplePattern = [
+        { x: 0.6, y: 0.2 },
+        { x: 0.8, y: 0.6 },
+        { x: 0.4, y: 0.8 },
+        { x: 0.2, y: 0.4 }
+      ];
+      drawFunction = function(edges, x, y) {
+        var alpha = 0;
+        for (var i = 0; i < 4; ++i) {
+          if ((edges[0].fx(x + samplePattern[i].x, y + samplePattern[i].y) <= 0) &&
+            (edges[1].fx(x + samplePattern[i].x, y + samplePattern[i].y) <= 0) &&
+            (edges[2].fx(x + samplePattern[i].x, y + samplePattern[i].y) <= 0)) {
+            alpha = alpha + subPixelAlphaStep;
+          }
+          drawPixel(x + samplePattern[i].x, y + samplePattern[i].y, 'rgb(0, 0, 255)');
+
+        }
+        if (alpha != 0) {
+          drawPixelVirtualCanvas(x, y, `rgba(255, 0, 0, ${alpha})`);
+        }
+      }
+    } else if (superSample == 8) {
+      // ssaa 8x
+      ssaa = 8;
+      var subPixelAlphaStep = 1 / ssaa;
+      var samplePattern = [
+        { x: 0.2, y: 0.2 },
+        { x: 0.5, y: 0.1 },
+        { x: 0.9, y: 0.3 },
+        { x: 0.4, y: 0.4 },
+        { x: 0.6, y: 0.6 },
+        { x: 0.1, y: 0.7 },
+        { x: 0.3, y: 0.9 },
+        { x: 0.8, y: 0.8 }
+      ];
+      drawFunction = function(edges, x, y) {
+        var alpha = 0;
+        for (var i = 0; i < 8; ++i) {
+          if ((edges[0].fx(x + samplePattern[i].x, y + samplePattern[i].y) <= 0) &&
+            (edges[1].fx(x + samplePattern[i].x, y + samplePattern[i].y) <= 0) &&
+            (edges[2].fx(x + samplePattern[i].x, y + samplePattern[i].y) <= 0)) {
+            alpha = alpha + subPixelAlphaStep;
+          }
+          drawPixel(x + samplePattern[i].x, y + samplePattern[i].y, 'rgb(0, 0, 255)');
+        }
+        if (alpha != 0) {
+          drawPixelVirtualCanvas(x, y, `rgba(255, 0, 0, ${alpha})`);
+        }
+      }
+    } else if (superSample == 16) {
+      // ssaa 16x
+      ssaa = 16;
+      var subPixelAlphaStep = 1 / ssaa;
+      var hStep = Math.sqrt(ssaa);
+      var vStep = Math.sqrt(ssaa);
+      drawFunction = function(edges, x, y) {
+        var alpha = 0;
+        for (var i = subPixelAlphaStep; i <= hStep * subPixelAlphaStep; i += subPixelAlphaStep) {
+          for (var j = subPixelAlphaStep; j <= vStep * subPixelAlphaStep; j += subPixelAlphaStep) {
+            if ((edges[0].fx(x + i, y + j) <= 0) &&
+              (edges[1].fx(x + i, y + j) <= 0) &&
+              (edges[2].fx(x + i, y + j) <= 0)) {
+              alpha = alpha + subPixelAlphaStep;
+            }
+          }
+        }
+        drawPixelVirtualCanvas(x, y, `rgba(255, 0, 0, ${alpha})`);
+      }
+    } else
+    if (superSample != null) {
+      // ssaa 2x
+      ssaa = 2;
+      var subPixelAlphaStep = 1 / ssaa;
+      drawFunction = function(edges, x, y) {
+        var alpha = 0;
+        if ((edges[0].fx(x + 0.5, y + 0.5) <= 0) &&
+          (edges[1].fx(x + 0.5, y + 0.5) <= 0) &&
+          (edges[2].fx(x + 0.5, y + 0.5) <= 0)) {
+          alpha += subPixelAlphaStep;
+        }
+        if ((edges[0].fx(x, y) <= 0) &&
+          (edges[1].fx(x, y) <= 0) &&
+          (edges[2].fx(x, y) <= 0)) {
+          alpha += subPixelAlphaStep;
+        }
+        drawPixelVirtualCanvas(x, y, `rgba(255, 0, 0, ${alpha})`);
+      }
+    } else {
+      // no ssaa, only one sample point at pixel center position
+      ssaa = 0;
+      drawFunction = function(edges, x, y) {
+        if ((edges[0].fx(x + 0.5, y + 0.5) <= 0) &&
+          (edges[1].fx(x + 0.5, y + 0.5) <= 0) &&
+          (edges[2].fx(x + 0.5, y + 0.5) <= 0)) {
+          drawPixelVirtualCanvas(x, y);
+        }
+        drawPixel(x + 0.5, y + 0.5, 'rgb(0, 0, 255)');
+      }
+    }
     var aabb = this.AABB();
     for (var i = aabb.AA.x; i < aabb.BB.x; ++i) {
       for (var j = aabb.AA.y; j < aabb.BB.y; ++j) {
-        if ((this.edges[0].fx(i, j) <= 0) &&
-          (this.edges[1].fx(i, j) <= 0) &&
-          (this.edges[2].fx(i, j) <= 0)) {
-          drawPixelVirtualCanvas(i, j);
-        }
+        drawFunction(this.edges, i, j);
       }
     }
     // draw edge on js canvas
@@ -236,6 +349,11 @@ function testCase(ctx) {
   var triangle = new Triangle(60.5, 10.5, 100.4, 50.3, 80.8, 100.4);
   triangle.drawAABBVirtualCanvas();
   triangle.rasterizeHalfPlane();
+
+  // test super sample
+  var triangle = new Triangle(110.5, 10.5, 150.4, 50.3, 130.8, 100.4);
+  triangle.drawAABBVirtualCanvas();
+  triangle.rasterizeHalfPlane(8);
 }
 
 function draw() {
